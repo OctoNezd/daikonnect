@@ -1,0 +1,7 @@
+{
+    "sweetpad.build.scheme": "MyApp",
+    "sweetpad.build.destination": {
+        "id": "generic-macos",
+        "type": "generic"
+    }
+}

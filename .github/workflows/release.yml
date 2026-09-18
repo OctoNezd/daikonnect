@@ -1,0 +1,146 @@
+name: Release
+
+# Cut a release by pushing a tag, or run it by hand and give a version.
+#
+# The build number comes from the tag, not from the workflow run number, so
+# that the app's CFBundleVersion matches the number in the release tag. The
+# app's update check compares exactly that: it reads the latest release tag,
+# takes its trailing number, and compares it with its own build number.
+#
+# Signing: by default the build is ad-hoc signed, which is enough to run but
+# means each release is a different code identity — so macOS treats every
+# release as a new app and re-asks for the Local Network permission. Supplying
+# a certificate makes that stable.
+#
+# Two secrets enable it, both optional:
+#
+#   SIGNING_CERTIFICATE_P12       base64 of a .p12 containing certificate + key
+#   SIGNING_CERTIFICATE_PASSWORD  the password that .p12 was exported with
+#
+# Make them with the script, which generates a certificate for this purpose
+# and puts the base64 on the clipboard along with the password to store:
+#
+#   Scripts/make-signing-identity.sh --ci
+#
+# Do not use `security export -t identities` for this: it offers every identity
+# in the keychain, an Apple one among them, which is not what a self-signed
+# build should be signed with. To reuse an existing identity instead, export
+# it from Keychain Access — My Certificates, pick the certificate by name,
+# right-click, Export — and base64 that file.
+#
+# A self-signed certificate is enough for the identity to stay stable. It does
+# not silence the "unidentified developer" warning on someone else's Mac —
+# only an Apple Developer ID certificate plus notarisation does that, and both
+# are secrets of the same shape (the notarisation step needs an App Store
+# Connect key or an app-specific password).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, e.g. v1.0.75 (its number becomes the build number)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      # Job-level so it can be tested in a step's `if`; secrets cannot be
+      # referenced there directly.
+      SIGNING_P12: ${{ secrets.SIGNING_CERTIFICATE_P12 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Work out the build number from the version
+        id: version
+        run: |
+          TAG="${{ github.event.inputs.version || github.ref_name }}"
+          BUILD="$(printf '%s' "$TAG" | grep -oE '[0-9]+$' || true)"
+          if [ -z "$BUILD" ]; then
+            echo "The tag '$TAG' does not end in a number; it is what the app compares." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Import the signing certificate
+        id: signing
+        if: env.SIGNING_P12 != ''
+        env:
+          SIGNING_P12_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          set -e
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          printf '%s' "$SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/identity.p12"
+          security create-keychain -p actions "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p actions "$KEYCHAIN"
+          security import "$RUNNER_TEMP/identity.p12" -k "$KEYCHAIN" \
+            -P "$SIGNING_P12_PASSWORD" -T /usr/bin/codesign
+          # Without this, codesign stops on a keychain prompt it cannot answer.
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k actions "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/identity.p12"
+          # No -v: that lists only *trusted* identities, and a self-signed
+          # certificate is not trusted — it would report none and the build
+          # would then fail to find what was just imported.
+          NAME="$(security find-identity -p codesigning "$KEYCHAIN" | grep -oE '"[^"]+"' | head -1 | tr -d '"')"
+          if [ -z "$NAME" ]; then
+            echo "The certificate imported but no signing identity was found." >&2
+            exit 1
+          fi
+          echo "Using signing identity: $NAME"
+          echo "identity=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          # Read by the "Set build number" phase, which otherwise counts commits
+          # — meaningless here, since CI checks out one commit every time.
+          DAIKONNECT_BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          # Ad-hoc when no certificate was supplied.
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity || '-' }}
+        run: |
+          xcodebuild \
+            -project daiKonnect.xcodeproj \
+            -scheme MyApp \
+            -configuration Release \
+            -destination "platform=macOS" \
+            -derivedDataPath build \
+            CURRENT_PROJECT_VERSION="$DAIKONNECT_BUILD_NUMBER" \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            CODE_SIGN_STYLE=Manual \
+            build
+
+      - name: Check the build number took
+        run: |
+          PLIST=build/Build/Products/Release/daiKonnect.app/Contents/Info.plist
+          GOT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+          echo "CFBundleVersion = $GOT, expected ${{ steps.version.outputs.build }}"
+          [ "$GOT" = "${{ steps.version.outputs.build }}" ]
+
+      - name: Check what signed it
+        run: |
+          codesign -dv build/Build/Products/Release/daiKonnect.app 2>&1 | grep -E 'Authority|Signature|flags' || true
+
+      - name: Package the disk image
+        run: |
+          Scripts/make-dmg.sh \
+            build/Build/Products/Release/daiKonnect.app \
+            "daiKonnect-${{ steps.version.outputs.tag }}.dmg"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "daiKonnect-${{ steps.version.outputs.tag }}.dmg" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes

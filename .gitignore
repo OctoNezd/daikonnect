@@ -1,0 +1,27 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+
+# Upstream reference sources, not part of the project
+.reference/
+
+# Signing identities are generated locally, never committed
+*.p12
+*.pem
