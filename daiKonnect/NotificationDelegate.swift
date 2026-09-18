@@ -252,6 +252,12 @@ enum NotificationCategory {
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
     UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+    // Ask about notifications at launch rather than waiting for the first
+    // phone event: macOS only ever shows the prompt once, and it is easy to
+    // miss in an app that lives in the menu bar and may never be frontmost.
+    if !AppEnvironment.isPreview {
+      KDEConnectService.shared.ensureNotificationPermission()
+    }
     // Quietly ask GitHub whether there is a newer build.
     UpdateChecker.shared.checkQuietlyOnLaunch()
 
