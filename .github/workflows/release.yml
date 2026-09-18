@@ -2,10 +2,11 @@ name: Release
 
 # Cut a release by pushing a tag, or run it by hand and give a version.
 #
-# The build number comes from the tag, not from the workflow run number, so
-# that the app's CFBundleVersion matches the number in the release tag. The
-# app's update check compares exactly that: it reads the latest release tag,
-# takes its trailing number, and compares it with its own build number.
+# A tag like v1.2.0 sets both numbers the build carries: the version
+# (CFBundleShortVersionString, what people see) is the tag without its "v",
+# and the build (CFBundleVersion, what Sparkle compares) is a monotonic
+# integer folded from the version parts — major*10000 + minor*100 + patch, so
+# v1.1.0 is 10100 and still newer than v1.0.3's 10003.
 #
 # Signing: by default the build is ad-hoc signed, which is enough to run but
 # means each release is a different code identity — so macOS treats every
@@ -74,17 +75,32 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Work out the build number from the version
+      - name: Work out the version and build number
         id: version
         run: |
           TAG="${{ github.event.inputs.version || github.ref_name }}"
-          BUILD="$(printf '%s' "$TAG" | grep -oE '[0-9]+$' || true)"
-          if [ -z "$BUILD" ]; then
-            echo "The tag '$TAG' does not end in a number; it is what the app compares." >&2
-            exit 1
-          fi
+          # A tag like v1.1.0 or v1.2: the version is what people see, and the
+          # build is the integer both the app and Sparkle compare. The build
+          # cannot be the tag's trailing digits, because v1.1.0 would then be
+          # build 0 — older than v1.0.3. Fold the components instead.
+          VERSION="${TAG#v}"
+          OLDIFS="$IFS"; IFS=.
+          set -- $VERSION
+          IFS="$OLDIFS"
+          MAJOR="${1:-0}"; MINOR="${2:-0}"; PATCH="${3:-0}"
+          for part in "$MAJOR" "$MINOR" "$PATCH"; do
+            case "$part" in
+              ''|*[!0-9]*)
+                echo "Tag '$TAG' is not v<major>[.<minor>[.<patch>]]." >&2
+                exit 1
+                ;;
+            esac
+          done
+          BUILD=$(( 10#$MAJOR * 10000 + 10#$MINOR * 100 + 10#$PATCH ))
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG: version $VERSION, build $BUILD"
 
       - name: Import the signing certificate
         id: signing
@@ -118,8 +134,7 @@ jobs:
 
       - name: Build
         env:
-          # Read by the "Set build number" phase, which otherwise counts commits
-          # — meaningless here, since CI checks out one commit every time.
+          # The build number both the app and Sparkle compare, from the tag.
           DAIKONNECT_BUILD_NUMBER: ${{ steps.version.outputs.build }}
           # Ad-hoc when no certificate was supplied.
           SIGNING_IDENTITY: ${{ steps.signing.outputs.identity || '-' }}
@@ -131,15 +146,19 @@ jobs:
             -destination "platform=macOS" \
             -derivedDataPath build \
             CURRENT_PROJECT_VERSION="$DAIKONNECT_BUILD_NUMBER" \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
             CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
             CODE_SIGN_STYLE=Manual \
             build
 
-      - name: Check the build number took
+      - name: Check the version and build number took
         run: |
           PLIST=build/Build/Products/Release/daiKonnect.app/Contents/Info.plist
           GOT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+          VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          echo "CFBundleShortVersionString = $VER, expected ${{ steps.version.outputs.version }}"
           echo "CFBundleVersion = $GOT, expected ${{ steps.version.outputs.build }}"
+          [ "$VER" = "${{ steps.version.outputs.version }}" ]
           [ "$GOT" = "${{ steps.version.outputs.build }}" ]
 
       - name: Check what signed it
