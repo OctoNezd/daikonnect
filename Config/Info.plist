@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Sparkle: the appcast feed, and the EdDSA public key that verifies
+	     updates. Only the public key belongs here; the private key stays in
+	     the login keychain locally and in a CI secret. Generate the pair with
+	     Sparkle's generate_keys and paste the printed key below. -->
+	<key>SUFeedURL</key>
+	<string>https://github.com/octonezd/daikonnect/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>JNP61ixhcKVfIq3GKQpQNMFNRP/0yZ7IQFxQLib4B/s=</string>
+</dict>
+</plist>

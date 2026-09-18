@@ -28,6 +28,17 @@ name: Release
 # it from Keychain Access — My Certificates, pick the certificate by name,
 # right-click, Export — and base64 that file.
 #
+# Updates: the app updates through Sparkle, and each release publishes an
+# appcast.xml beside the disk image — Sparkle's feed URL is
+# .../releases/latest/download/appcast.xml. Signing that appcast needs one more
+# secret, the EdDSA private key:
+#
+#   SPARKLE_ED_PRIVATE_KEY  the private key exported by Sparkle's generate_keys
+#                           (`generate_keys -x FILE` writes it out)
+#
+# Without it the release still builds, but no appcast is published, so existing
+# installs cannot see the update.
+#
 # A self-signed certificate is enough for the identity to stay stable. It does
 # not silence the "unidentified developer" warning on someone else's Mac —
 # only an Apple Developer ID certificate plus notarisation does that, and both
@@ -141,11 +152,44 @@ jobs:
             build/Build/Products/Release/daiKonnect.app \
             "daiKonnect-${{ steps.version.outputs.tag }}.dmg"
 
+      - name: Build the appcast
+        id: appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          BIN="build/SourcePackages/artifacts/sparkle/Sparkle/bin"
+          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "No SPARKLE_ED_PRIVATE_KEY secret; publishing without an appcast."
+            exit 0
+          fi
+          if [ ! -x "$BIN/generate_appcast" ]; then
+            echo "Sparkle's generate_appcast was not found at $BIN" >&2
+            exit 1
+          fi
+          mkdir -p updates
+          cp "daiKonnect-$TAG.dmg" updates/
+          # The private key travels on stdin, so it never lands in an argument
+          # list or the process table.
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$BIN/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/" \
+            --link "https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" \
+            -o updates/appcast.xml \
+            updates
+          echo "Publishing appcast for $TAG:"
+          head -c 600 updates/appcast.xml
+          echo "path=updates/appcast.xml" >> "$GITHUB_OUTPUT"
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ASSETS=("daiKonnect-${{ steps.version.outputs.tag }}.dmg")
+          if [ -f "${{ steps.appcast.outputs.path }}" ]; then
+            ASSETS+=("${{ steps.appcast.outputs.path }}")
+          fi
           gh release create "${{ steps.version.outputs.tag }}" \
-            "daiKonnect-${{ steps.version.outputs.tag }}.dmg" \
+            "${ASSETS[@]}" \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes

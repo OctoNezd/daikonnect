@@ -36,9 +36,13 @@ import SwiftUI
     }
     .commands {
       // Put our own About window on the App menu's About item, which
-      // otherwise opens the system panel with nothing in it.
+      // otherwise opens the system panel with nothing in it, and let Sparkle
+      // put its Check for Updates… item right below it.
       CommandGroup(replacing: .appInfo) {
         AboutCommand()
+      }
+      CommandGroup(after: .appInfo) {
+        CheckForUpdatesView()
       }
     }
   }

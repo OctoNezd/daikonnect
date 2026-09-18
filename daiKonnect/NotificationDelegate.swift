@@ -258,8 +258,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     if !AppEnvironment.isPreview {
       KDEConnectService.shared.ensureNotificationPermission()
     }
-    // Quietly ask GitHub whether there is a newer build.
-    UpdateChecker.shared.checkQuietlyOnLaunch()
 
     // Coming back from System Settings is the moment the permission may
     // have changed under us, and the moment someone checks the notice.
