@@ -1,9 +1,10 @@
-<p align="center">
 ![icon](misc/icon.png)
+
 # daiKonnect
+
 ## KDE connect client for macOS
+
 ![main window](misc/mainui.png)
-</p>
 
 ## Install
 
