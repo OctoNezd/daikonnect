@@ -36,13 +36,26 @@ ln -s /Applications "$STAGE/Applications"
 
 rm -f "$OUT"
 echo "make-dmg: writing $OUT"
-hdiutil create \
-    -volname "$NAME" \
-    -srcfolder "$STAGE" \
-    -fs HFS+ \
-    -format UDZO \
-    -ov \
-    "$OUT" >/dev/null
+# `diskutil image create from` rather than `hdiutil create`. hdiutil create is
+# deprecated on current macOS, and on the macOS 27 CI runner it wrote an image
+# that `hdiutil verify` then rejected as corrupt. diskutil is the supported
+# replacement; it makes an APFS image, which is what Sparkle recommends too.
+# Older macOS has no `diskutil image`, so fall back to hdiutil there.
+if ! diskutil image create from \
+        --format UDZO \
+        --volumeName "$NAME" \
+        "$STAGE" \
+        "$OUT" >/dev/null; then
+    echo "make-dmg: diskutil image create failed or is unavailable; using hdiutil" >&2
+    rm -f "$OUT"
+    hdiutil create \
+        -volname "$NAME" \
+        -srcfolder "$STAGE" \
+        -fs HFS+ \
+        -format UDZO \
+        -ov \
+        "$OUT" >/dev/null
+fi
 
 hdiutil verify "$OUT" >/dev/null
 echo "make-dmg: $OUT ($(du -h "$OUT" | cut -f1))"
