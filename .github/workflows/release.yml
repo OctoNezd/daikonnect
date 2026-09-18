@@ -48,7 +48,12 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-latest
+    # Xcode 27 (macOS 27) on purpose: the app icon is an Icon Composer 2.0
+    # document, and Xcode 26's actool cannot open it — on macos-latest the
+    # build dies with "Could not open AppIcon.icon" and an actool exception.
+    # This is a public-preview image; move it to a stable label once one
+    # carries Xcode 27.
+    runs-on: xcode-27
     env:
       # Job-level so it can be tested in a step's `if`; secrets cannot be
       # referenced there directly.

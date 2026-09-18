@@ -25,3 +25,6 @@ Packages/
 # Signing identities are generated locally, never committed
 *.p12
 *.pem
+
+# gh ci logs
+logs_*.zip
