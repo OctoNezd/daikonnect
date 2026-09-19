@@ -48,6 +48,13 @@ final class MacMediaController {
     private let controller = MediaController()
     /// Latest state, updated by the listener.
     private var latest: MacNowPlaying?
+    /// The payload `latest` was built from, kept so its position can be
+    /// extrapolated at the moment it is asked for rather than when the system
+    /// last published a change.
+    private var latestPayload: TrackInfo.Payload?
+    /// When that payload arrived, as a fallback clock when it carries no
+    /// timestamp of its own.
+    private var latestPositionAt: Date?
     private var isListening = false
 
     /// Last non-empty player name. The phone keys its players by name and
@@ -94,7 +101,24 @@ final class MacMediaController {
             currentName = latest.appName
             nameChanged = true
         }
-        completion(currentName, nameChanged, latest)
+
+        // Extrapolate the position to now. `handle` runs only when the system
+        // publishes a change, so the position stored there is frozen at that
+        // moment; sending it again later drags the phone's progress bar back
+        // by however long ago that was — which is what made it jump roughly
+        // every poll.
+        var state = latest
+        if var fresh = state {
+            if let seconds = latestPayload?.currentElapsedTime, seconds > 0 {
+                fresh.positionMs = Int(seconds * 1000)
+            } else if fresh.isPlaying, let at = latestPositionAt {
+                // The payload carries no usable timestamp, so advance from
+                // when it arrived at normal speed.
+                fresh.positionMs += Int(Date().timeIntervalSince(at) * 1000)
+            }
+            state = fresh
+        }
+        completion(currentName, nameChanged, state)
     }
 
     /// Bytes for an `file://` URL previously handed out as cover art.
@@ -128,9 +152,13 @@ final class MacMediaController {
     private func handle(_ info: TrackInfo?) {
         guard let payload = info?.payload else {
             latest = nil
+            latestPayload = nil
+            latestPositionAt = nil
             onChange?()
             return
         }
+        latestPayload = payload
+        latestPositionAt = Date()
 
         var state = MacNowPlaying()
         state.appName = payload.applicationName ?? ""

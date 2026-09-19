@@ -2569,9 +2569,12 @@ final class KDEConnectService: ObservableObject {
       // matters when it drifted (e.g. someone seeked on the Mac).
       var positionDrift = Int.max
       if let at = self.lastMacPositionSentAt {
-        let expected =
-          self.lastMacPositionSentMs
-          + Int(Date().timeIntervalSince(at) * 1000)
+        // Only a playing player is expected to have moved on since the last
+        // send. Counting elapsed time while paused made every poll look like a
+        // seek, so the same stale position was resent over and over.
+        let elapsed =
+          state?.isPlaying == true ? Int(Date().timeIntervalSince(at) * 1000) : 0
+        let expected = self.lastMacPositionSentMs + elapsed
         positionDrift = abs(expected - (state?.positionMs ?? 0))
       }
 
