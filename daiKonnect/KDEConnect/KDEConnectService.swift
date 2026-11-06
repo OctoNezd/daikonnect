@@ -39,6 +39,9 @@ final class KDEConnectService: ObservableObject {
   private var macPollWorkItem: DispatchWorkItem?
   @Published var ringingDevices: Set<String> = []
   @Published var lastCallEvent: [String: String] = [:]
+  /// Mac players seen so far, so Settings can offer a toggle for each.
+  @Published private(set) var knownMacPlayers: [String] = []
+  private static let knownMacPlayersKey = "daiKonnect.knownMacPlayers"
 
   // MARK: Diagnostics (visible in UI + ~/Library/Logs/daiKonnect.log)
   @Published var udpSentCount = 0
@@ -235,6 +238,8 @@ final class KDEConnectService: ObservableObject {
   private init() {
     loadPaired()
     loadPeerCertificates()
+    knownMacPlayers = UserDefaults.standard
+      .stringArray(forKey: Self.knownMacPlayersKey) ?? []
     // Restore previously known devices so the list isn't empty on a cold
     // boot; they show as offline until discovery/connect succeeds.
     // Skipped in previews, which shouldn't surface real device state.
@@ -2471,6 +2476,13 @@ final class KDEConnectService: ObservableObject {
     }
     MacMediaController.shared.playerSnapshot { [weak self] name, _, _ in
       guard let self else { return }
+      // Do not advertise a player the user excluded.
+      if MediaSettings.excludedPlayers.contains(name) {
+        self.send(
+          to: deviceId,
+          packet: KDEPacket(type: KDEPacketType.mpris, body: ["playerList": []]))
+        return
+      }
       self.send(
         to: deviceId,
         packet: KDEPacket(
@@ -2585,6 +2597,15 @@ final class KDEConnectService: ObservableObject {
 
     MacMediaController.shared.playerSnapshot { [weak self] name, nameChanged, state in
       guard let self else { return }
+      self.rememberMacPlayer(name)
+      // A player the user excluded keeps playing on the Mac but is not
+      // advertised to the phone. Clear one already sent, once.
+      if MediaSettings.excludedPlayers.contains(name) {
+        self.suppressMacPlayer(targets: targets)
+        self.scheduleNextMacPoll(
+          after: state == nil ? Self.macIdlePollInterval : Self.macActivePollInterval)
+        return
+      }
 
       let signature = self.macSignature(name: name, state: state)
 
@@ -2630,6 +2651,34 @@ final class KDEConnectService: ObservableObject {
           ? Self.macIdlePollInterval
           : Self.macActivePollInterval)
     }
+  }
+
+  /// Called when the media exclusions change, so an excluded player is cleared
+  /// from the phone right away rather than on the next poll.
+  func macMediaSettingsChanged() {
+    refreshMacNowPlaying(force: true)
+  }
+
+  private func rememberMacPlayer(_ name: String) {
+    guard !name.isEmpty, !knownMacPlayers.contains(name) else { return }
+    knownMacPlayers.append(name)
+    knownMacPlayers.sort()
+    UserDefaults.standard.set(knownMacPlayers, forKey: Self.knownMacPlayersKey)
+  }
+
+  /// Drops an excluded player from the phone. Only sends the empty player list
+  /// when the phone had actually been told about one, so an excluded player
+  /// does not cause a packet every poll.
+  private func suppressMacPlayer(targets: [RemoteDevice]) {
+    guard lastMacState != nil || lastMacSignature != nil else { return }
+    lastMacState = nil
+    lastMacSignature = nil
+    for device in targets {
+      send(
+        to: device.deviceId,
+        packet: KDEPacket(type: KDEPacketType.mpris, body: ["playerList": []]))
+    }
+    log("Mac media: current player is excluded — cleared from \(targets.count) device(s)")
   }
 
   /// Sends one player's state to a device. Also the single place that

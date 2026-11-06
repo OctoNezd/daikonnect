@@ -10,6 +10,7 @@ enum AppSettingsKeys {
     static let clipboardSync = "daiKonnect.clipboardSync"
     static let clipboardExcludedApps = "daiKonnect.clipboardExcludedApps"
     static let notificationExcludedApps = "daiKonnect.notificationExcludedApps"
+    static let mediaExcludedPlayers = "daiKonnect.mediaExcludedPlayers"
     static let showMenuBarIcon = "daiKonnect.showMenuBarIcon"
 }
 
@@ -39,6 +40,15 @@ enum NotificationSettings {
     }
 }
 
+/// Media preferences, readable from the service's poll path.
+enum MediaSettings {
+    /// Mac player names — what MediaRemote reports as the application name,
+    /// e.g. "Firefox" — whose state is not synced to the phone.
+    static var excludedPlayers: [String] {
+        UserDefaults.standard.stringArray(forKey: AppSettingsKeys.mediaExcludedPlayers) ?? []
+    }
+}
+
 /// Environment facts about how this process was launched.
 enum AppEnvironment {
     /// True when the code is running inside an Xcode preview. Previews must
@@ -65,6 +75,10 @@ final class AppSettings: ObservableObject {
     /// them. Defaults to on.
     @Published private(set) var allowRemoteMediaControl: Bool
 
+    /// Mac player names (the app name MediaRemote reports, e.g. "Firefox")
+    /// whose state is kept off the phone. They keep playing on the Mac.
+    @Published private(set) var mediaExcludedPlayers: [String]
+
     /// When on, clipboard text is exchanged with the phone. Concealed content
     /// is never sent regardless of this.
     @Published private(set) var clipboardSync: Bool
@@ -84,6 +98,8 @@ final class AppSettings: ObservableObject {
         detailedStatus = UserDefaults.standard.bool(forKey: AppSettingsKeys.detailedStatus)
         allowRemoteMediaControl = UserDefaults.standard
             .object(forKey: AppSettingsKeys.allowRemoteMediaControl) as? Bool ?? true
+        mediaExcludedPlayers = UserDefaults.standard
+            .stringArray(forKey: AppSettingsKeys.mediaExcludedPlayers) ?? []
         clipboardSync = UserDefaults.standard.object(forKey: AppSettingsKeys.clipboardSync) as? Bool ?? true
         clipboardExcludedApps = UserDefaults.standard.stringArray(forKey: AppSettingsKeys.clipboardExcludedApps) ?? []
         notificationExcludedApps = UserDefaults.standard
@@ -136,6 +152,17 @@ final class AppSettings: ObservableObject {
     func setAllowRemoteMediaControl(_ on: Bool) {
         allowRemoteMediaControl = on
         UserDefaults.standard.set(on, forKey: AppSettingsKeys.allowRemoteMediaControl)
+    }
+
+    func addMediaExcludedPlayer(_ name: String) {
+        guard !mediaExcludedPlayers.contains(name) else { return }
+        mediaExcludedPlayers.append(name)
+        UserDefaults.standard.set(mediaExcludedPlayers, forKey: AppSettingsKeys.mediaExcludedPlayers)
+    }
+
+    func removeMediaExcludedPlayer(_ name: String) {
+        mediaExcludedPlayers.removeAll { $0 == name }
+        UserDefaults.standard.set(mediaExcludedPlayers, forKey: AppSettingsKeys.mediaExcludedPlayers)
     }
 
     func setDetailedStatus(_ on: Bool) {
