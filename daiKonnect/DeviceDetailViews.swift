@@ -559,7 +559,9 @@ private struct MessageBubble: View {
                 if message.incoming, let from = message.addresses.first {
                     Text(from).font(.caption).foregroundStyle(.secondary)
                 }
-                Text(message.body).font(.body)
+                Text(linkedBody)
+                    .font(.body)
+                    .textSelection(.enabled)
                 Text(message.date, style: .time).font(.caption2).foregroundStyle(.secondary)
             }
             .padding(8)
@@ -567,6 +569,52 @@ private struct MessageBubble: View {
             .cornerRadius(10)
             if message.incoming { Spacer() }
         }
+    }
+
+    // Shared instance to avoid costly re-initialization
+    private static let linkDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
+    private var linkedBody: AttributedString {
+        let body = message.body
+        let ns = body as NSString
+        guard let detector = Self.linkDetector else {
+            return AttributedString(body)
+        }
+
+        var result = AttributedString()
+        var cursor = body.startIndex
+        let matches = detector.matches(
+            in: body,
+            range: NSRange(location: 0, length: ns.length)
+        )
+
+        for match in matches {
+            guard let url = match.url,
+                  let scheme = url.scheme?.lowercased(),
+                  ["https", "http"].contains(scheme), // Whitelist safe schemes
+                  let range = Range(match.range, in: body),
+                  range.lowerBound >= cursor
+            else {
+                continue
+            }
+
+            if cursor < range.lowerBound {
+                result.append(AttributedString(String(body[cursor..<range.lowerBound])))
+            }
+
+            var link = AttributedString(String(body[range]))
+            link.link = url
+            result.append(link)
+            cursor = range.upperBound
+        }
+
+        if cursor < body.endIndex {
+            result.append(AttributedString(String(body[cursor...])))
+        }
+
+        return result
     }
 }
 
