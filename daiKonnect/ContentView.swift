@@ -85,6 +85,11 @@ struct ContentView: View {
               )
               .cornerRadius(8)
               .onTapGesture { service.selectedDeviceId = device.id }
+              .contextMenu {
+                Button("Forget Device", role: .destructive) {
+                  service.forget(deviceId: device.id)
+                }
+              }
           }
         }
       }

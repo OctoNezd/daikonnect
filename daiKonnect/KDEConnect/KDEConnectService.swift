@@ -1297,6 +1297,29 @@ final class KDEConnectService: ObservableObject {
     statusMessage = "Unpaired \(displayName(deviceId))"
   }
 
+  /// Unpair and drop everything held for a device — the sidebar's "Forget
+  /// Device". Discovery can still find the phone again, in which case it comes
+  /// back as an unpaired device, ready to pair afresh.
+  func forget(deviceId: String) {
+    let name = displayName(deviceId)
+    unpair(deviceId: deviceId)
+    // Close the link too: leaving it open would report a connected device the
+    // sidebar no longer has a row for.
+    links.removeValue(forKey: deviceId)?.close()
+    connecting.remove(deviceId)
+    devices.removeAll { $0.deviceId == deviceId }
+    batteries.removeValue(forKey: deviceId)
+    notifications.removeValue(forKey: deviceId)
+    conversations.removeValue(forKey: deviceId)
+    mediaPlayers.removeValue(forKey: deviceId)
+    ringingDevices.remove(deviceId)
+    lastCallEvent.removeValue(forKey: deviceId)
+    if selectedDeviceId == deviceId { selectedDeviceId = nil }
+    saveKnownDevices()
+    statusMessage = "Forgot \(name)"
+    log("Forgot \(name)")
+  }
+
   private func handlePair(deviceId: String, body: [String: Any]) {
     guard let pair = body.kdeBool("pair") else { return }
     log("Pair packet from \(displayName(deviceId)): \(pair ? "request/accept" : "reject/unpair")")
